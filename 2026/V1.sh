@@ -66,3 +66,82 @@ sudo pam-auth-update --enable faillock faillock_reset faillock_notify
 echo "####################################################################################################"
 echo "Account lockout policy configured"
 echo "####################################################################################################"
+
+
+#disallowing null passwords
+sudo sed -i '/pam_unix\.so/ s/nullok//g' /etc/pam.d/common-auth
+
+echo "####################################################################################################"
+echo "Null passwords disabled"
+echo "####################################################################################################"
+
+# Enable IPv4 TCP SYN Cookies
+if grep -q "^net.ipv4.tcp_syncookies" /etc/sysctl.conf; then
+    sudo sed -i 's/^net.ipv4.tcp_syncookies.*/net.ipv4.tcp_syncookies=1/' /etc/sysctl.conf
+else
+    echo "net.ipv4.tcp_syncookies=1" | sudo tee -a /etc/sysctl.conf
+fi
+
+sudo sysctl --system
+
+echo "################################################################################"
+echo "IPv4 TCP SYN cookies enabled"
+echo "################################################################################"
+
+# Enable Uncomplicated Firewall (UFW)
+sudo ufw enable
+
+echo "################################################################################"
+echo "UFW protection enabled"
+echo "################################################################################"
+
+# Disable and stop Nginx service
+sudo systemctl disable --now nginx
+
+echo "################################################################################"
+echo "Nginx service disabled"
+echo "################################################################################"
+
+# Disable and stop Squid proxy service
+sudo systemctl disable --now squid
+
+echo "################################################################################"
+echo "Squid service disabled"
+echo "################################################################################"
+
+# Update package lists and upgrade vsftpd specifically
+sudo apt update
+sudo apt-get --only-upgrade install -y vsftpd
+
+echo "################################################################################"
+echo "Vsftpd updated"
+echo "################################################################################"
+
+# Find and remove prohibited OGG media files across user directories
+sudo find /home -type f -name "*.ogg" -delete
+
+echo "################################################################################"
+echo "Prohibited OGG files removed"
+echo "################################################################################"
+
+# Find and remove prohibited software archive pyrdp
+sudo find / -name "*pyrdp*.zip" -exec rm -f {} +
+
+echo "################################################################################"
+echo "Prohibited software archive pyrdp removed"
+echo "################################################################################"
+
+# Purge unauthorized software packages (doona, xprobe)
+sudo apt purge -y doona xprobe
+
+echo "################################################################################"
+echo "Unauthorized software removed"
+echo "################################################################################"
+
+# Stop and remove the zod backdoor
+sudo pkill -f kneelB4zod.py
+sudo rm -f /usr/share/zod/kneelB4zod.py
+
+echo "################################################################################"
+echo "Zod backdoor removed"
+echo "################################################################################"
