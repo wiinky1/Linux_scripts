@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 
-sudo apt update 
+sudo getent shadow root
 
-sudo apt upgrade -y
+sudo passwd -l root
 
-sudo apt install ufw -y
+sudo getent shadow root
 
-sudo ufw enable
+sudo apt update
+sudo apt install -y libpam-pwquality
+
 
