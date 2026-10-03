@@ -26,4 +26,8 @@ sudo apt update
 sudo apt install -y libpam-pwquality
 
 # Set minimum password length to 12
-sudo sed -i 's/^#\? \?minlen.*/minlen = 12/' /etc/security/pwquality.conf
+sudo sed -i '/pam_unix\.so/ s/$/ minlen=12/' /etc/pam.d/common-password
+
+echo "##################################################################################################"
+echo "Min password length set"
+echo "##################################################################################################"
