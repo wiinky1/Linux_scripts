@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # =====================================================================
-#  CyberPatriot 2026 (Mint) — FULL SYSTEM HARDENING
-#  Scope : everything the rules book scores, EXCEPT the user-audit
-#          tasks (create tchalla / delete unauthorized users / set the
-#          17 passwords / chage -d 0).  Do those last, by hand.
+#  CyberPatriot 2026 — FULL SYSTEM HARDENING  (distro-agnostic: Mint, Ubuntu, or
+#  any CP-issued VM — the display manager is auto-detected)
+#  Scope : everything the rules book scores, EXCEPT (a) the user-audit
+#          tasks (create tchalla / delete unauthorized users / set the 17
+#          passwords / chage -d 0) and (b) the forensics ANSWER — the
+#          forensics question changes every round, so it is not pre-baked.
+#          Do (a) and (b) by hand, per round.
 #
-#  Run   :  sudo bash cap_hardening_2026.sh [path/to/forensics.pdf]
-#          (if you pass no PDF, it auto-detects a .pdf under /home)
+#  Run   :  sudo bash cap_hardening_2026.sh [optional:file-to-hexdump]
+#          (only pass a file if you want a raw hexdump; the forensics
+#           ANSWER is still yours to work out against THIS round's question)
 #
 #  Rules ref: CP19 Rules Book 2026 — sections cited inline below.
 #  Design  : idempotent, no `set -e` so one soft-fail never kills the
-#          run; every section prints an OK/WARN line; final report
-#          prints the forensics ANSWER for you to type in the report.
+#          run; every section prints an OK/WARN line; final report prints
+#          the settings to read off and paste into the report UI.
 # =====================================================================
 set -uo pipefail
 LC_ALL=C
@@ -26,13 +30,15 @@ step() { echo; echo -e "\n\033[1;36m== $* ==\033[0m"; }
 MEDIA_EXTS=(-iname '*.mp3' -o -iname '*.mp4' -o -iname '*.ogg' -o -iname '*.oga'
             -o -iname '*.wav' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.mkv'
             -o -iname '*.flv' -o -iname '*.wmv' -o -iname '*.aac' -o -iname '*.wma')
-# first-5-hex-bytes of a file (xxd if present, else od)
-first5() {
-  f="$1"
+# raw hexdump of a file's head (xxd if present, else od).
+# Used ONLY if you explicitly pass a file path; never auto-runs, never
+# claims an answer (the forensics question is different every round).
+hexhead() {
+  f="$1"; n="${2:-256}"
   if command -v xxd >/dev/null 2>&1; then
-    xxd -l 5 "$f" | awk '{print $1,$2,$3,$4,$5}'
+    xxd -l "$n" "$f"
   else
-    od -A x -t x1 -N 5 "$f" | head -1 | awk '{print $2,$3,$4,$5,$6}'
+    od -A x -t x1 -N "$n" "$f" | head -16
   fi
 }
 
@@ -42,7 +48,7 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-PDF="${1:-}"
+HEXFILE="${1:-}"        # optional: only used for a manual hexdump
 SSHGRP="ssh"
 
 real_users() { awk -F: '($3>=1000 && $3<65534){print $1}' /etc/passwd; }
@@ -52,25 +58,24 @@ echo "  host     : $(hostname)"
 echo "  kernel   : $(uname -r)"
 echo -n "  os       : "; (grep PRETTY /etc/os-release | cut -d= -f2- | tr -d '"') 2>/dev/null || true
 echo "  users    : $(real_users | tr '\n' ' ')"
-echo "  forensics: ${PDF:-<auto-detect a pdf under /home>}"
-warn "SYSTEM-SCOPE only.  USER-AUDIT (tchalla / delete ultron+thanos / 17 pw / chage -d 0) is NOT here — finish that by hand AFTER."
+echo "  hexdump  : ${HEXFILE:-(none — forensics is per-round; answered by hand)}"
+warn "SCOPE: system hardening only.  NOT in this script — do by hand, per round:"
+warn "   (a) USER-AUDIT: tchalla / delete ultron+thanos / 17 pw / chage -d 0"
+warn "   (b) the FORENSICS question/answer  (it changes every round)"
 echo "Press ENTER to run, or Ctrl-C to abort..."
 read -r _
 
 # =====================================================================
-step "1 · FORENSICS — first 5 hex bytes of the PDF (rule 2.7)"
-if [ -z "$PDF" ]; then
-  info "no PDF given — searching /home and /tmp for *.pdf ..."
-  cands=$(find /home /tmp -maxdepth 6 -type f -iname '*.pdf' 2>/dev/null | grep -viE '/(\.config|\.cache)/' | head -8)
-  echo "$cands" | sed 's/^/    - /'
-  PDF=$(echo "$cands" | head -1)
-fi
-if [ -n "$PDF" ] && [ -f "$PDF" ]; then
-  A=$(first5 "$PDF")
-  echo "    file : $PDF"
-  echo -e "\033[1;32m    >>> ANSWER TO TYPE IN THE REPORT:  $A\033[0m"
+step "1 · FORENSICS — per-round, NOT auto-answered (the question changes every round)"
+if [ -n "$HEXFILE" ] && [ -f "$HEXFILE" ]; then
+  info "raw hex dump of: $HEXFILE  (read it yourself against THIS round's real question)"
+  echo
+  hexhead "$HEXFILE" 256
+  echo
 else
-  fail "no PDF readable yet — re-run with the exact path after you locate it"
+  info "no file passed — intentional.  The forensics question differs every round,"
+  info "so this script does not guess one.  Over SSH, answer it yourself, e.g.:"
+  info "      xxd -l 5 <the file the question names>    then type the bytes it asks for"
 fi
 
 # =====================================================================
@@ -151,15 +156,34 @@ ufw status                       2>/dev/null | sed 's/^/    /'
 warn "if the scorer wants 554/tcp explicitly DENY, run:  sudo ufw deny 554/tcp"
 
 # =====================================================================
-step "7 · DISPLAY MANAGER = LIGHTDM (rule 2.11.5 / DM check)"
-systemctl enable lightdm 2>/dev/null && ok "systemctl enable lightdm" || info "enable returned non-zero (no [Install] — continuing)"
-mkdir -p /etc/X11
-echo "/usr/sbin/lightdm" >/etc/X11/default-display-manager && ok "default-display-manager -> /usr/sbin/lightdm"
-if [ -f /usr/lib/systemd/system/lightdm.service ]; then
-  update-alternatives --install /usr/lib/systemd/system/graphical.target graphical-target /usr/lib/systemd/system/lightdm.service 20 2>/dev/null
-  update-alternatives --set graphical-target lightdm 2>/dev/null && ok "graphical-target -> lightdm"
+step "7 · DISPLAY MANAGER — use the distro's own DM (Mint→LightDM, Ubuntu→GDM, KDE→SDDM)"
+DM=""; DM_PATH=""
+# 1) respect a choice the box already made
+EXISTING_DM=$(cat /etc/X11/default-display-manager 2>/dev/null)
+if [ -n "$EXISTING_DM" ] && [ -x "$EXISTING_DM" ]; then
+  DM_PATH="$EXISTING_DM"; DM=$(basename "$DM_PATH")
+else
+  # 2) otherwise, pick the first DM actually installed
+  for name in lightdm gdm3 gdm sddm; do
+    for bin in "/usr/sbin/$name" "/usr/bin/$name"; do
+      if [ -x "$bin" ]; then DM="$name"; DM_PATH="$bin"; break 2; fi
+    done
+  done
 fi
-echo -n "    now: "; cat /etc/X11/default-display-manager 2>/dev/null
+
+if [ -n "$DM" ]; then
+  mkdir -p /etc/X11
+  echo "$DM_PATH" >/etc/X11/default-display-manager && ok "default-display-manager -> $DM_PATH"
+  if [ -f "/usr/lib/systemd/system/${DM}.service" ]; then
+    update-alternatives --install /usr/lib/systemd/system/graphical.target graphical-target \
+      "/usr/lib/systemd/system/${DM}.service" 20 2>/dev/null
+    update-alternatives --set graphical-target "$DM" 2>/dev/null && ok "graphical-target -> $DM"
+  fi
+  systemctl enable "$DM" 2>/dev/null && ok "$DM enabled" || info "$DM enable non-zero (no [Install] — usually fine)"
+  echo -n "    now  : "; cat /etc/X11/default-display-manager 2>/dev/null
+else
+  warn "no display-manager binary auto-detected — set /etc/X11/default-display-manager by hand"
+fi
 
 # =====================================================================
 step "8 · POLLING / MAINTENANCE services + packages (rule 2.1.9 — scored)"
@@ -232,17 +256,14 @@ echo -n "  users : "
 awk -F: '($3>=1000 && $3<65534){printf "%s ", $1}' /etc/passwd; echo
 echo "  media : $(find /home -maxdepth 6 -type f \( -iname '*.mp3' -o -iname '*.mp4' -o -iname '*.wav' \) 2>/dev/null | wc -l) left"
 echo
-if [ -n "$PDF" ] && [ -f "$PDF" ]; then
-  echo -e "  \033[1;32mFORENSICS ANSWER (rule 2.7) >>>  $(first5 "$PDF")  <<<\033[0m"
-fi
 echo
-echo "  STILL TO DO (user-audit, by hand):"
+echo "  STILL TO DO (user-audit + forensics, by hand — each changes per round)"
 echo "    1) useradd tchalla + sudo + chage -d 0   (or keep the 17 if the rules say so)"
 echo "    2) userdel -r ultron ; userdel -r thanos"
 echo "    3) set ALL authorized users' passwords (uniquish, minlen≥10, mixed classes)"
 echo "       - use chpasswd with openssl -6 hashes to beat the dictionary check"
 echo "    4) chage -d 0  on every authorized user      (rule 2.2.7)"
-echo "    5) usermod -aG ssh tchalla (already covered if you ran this after step 1)"
-echo "    6) enter the FORENSICS ANSWER into the scoring report UI"
+echo "    5) usermod -aG ssh <each user you create>   (AllowGroups ssh)"
+echo "    6) answer THIS round's FORENSICS question in the report UI (it changes every round)"
 echo
 echo -e "\033[1;32mSYSTEM-SCOPE COMPLETE.\033[0m  Re-score once the user-audit items above are done."
